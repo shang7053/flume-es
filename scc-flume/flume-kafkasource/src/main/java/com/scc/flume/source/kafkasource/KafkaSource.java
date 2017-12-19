@@ -75,6 +75,7 @@ public class KafkaSource extends AbstractPollableSource implements Configurable 
 				headers.put("@topic", record.topic());
 				headers.put("@timestamp", Long.valueOf(StrUtil.getFirstDate(msg).getTime()).toString());
 				headers.put("@ip", StrUtil.getFirstIp(msg));
+				headers.put("@level", StrUtil.getLevel(msg));
 				headers.put("@offset", Long.valueOf(record.offset()).toString());
 				events.add(EventBuilder.withBody(msg.getBytes(), headers));
 			}

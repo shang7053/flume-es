@@ -63,5 +63,48 @@ public class StrUtil {
 		System.out.println(getFirstIp("111.111.111.111"));
 		System.out.println(getFirstIp("111.111.333.111"));
 		System.out.println(getFirstIp("111.111.111"));
+		System.out.println(getLevel("asdasdasdasd INFO asdasd"));
+	}
+
+	/**
+	 * @Title: getLevel
+	 * @Description: TODO(这里用一句话描述这个方法的作用)
+	 * @author shangchengcai@voole.com
+	 * @date 2017年12月19日 下午5:50:09
+	 * @param msg
+	 * @return
+	 */
+	public static String getLevel(String str) {
+		Pattern p = Pattern.compile("INFO");
+		Matcher m = p.matcher(str);
+		if (m.find()) {
+			return m.group();
+		}
+		p = Pattern.compile("WARN");
+		m = p.matcher(str);
+		if (m.find()) {
+			return m.group();
+		}
+		p = Pattern.compile("ERROR");
+		m = p.matcher(str);
+		if (m.find()) {
+			return m.group();
+		}
+		p = Pattern.compile("FATAL");
+		m = p.matcher(str);
+		if (m.find()) {
+			return m.group();
+		}
+		p = Pattern.compile("DEBUG");
+		m = p.matcher(str);
+		if (m.find()) {
+			return m.group();
+		}
+		p = Pattern.compile("ALL");
+		m = p.matcher(str);
+		if (m.find()) {
+			return m.group();
+		}
+		return "INFO";
 	}
 }
