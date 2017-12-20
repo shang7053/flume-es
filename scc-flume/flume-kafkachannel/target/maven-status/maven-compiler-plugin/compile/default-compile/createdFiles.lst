@@ -1,8 +1,0 @@
-com/scc/flume/channel/kafkachannel/KafkaChannel$1.class
-com/scc/flume/channel/kafkachannel/KafkaChannel.class
-com/scc/flume/channel/kafkachannel/ChannelRebalanceListener.class
-com/scc/flume/channel/kafkachannel/KafkaChannelConfiguration.class
-com/scc/flume/channel/kafkachannel/ChannelCallback.class
-com/scc/flume/channel/kafkachannel/KafkaChannel$TransactionType.class
-com/scc/flume/channel/kafkachannel/KafkaChannel$KafkaTransaction.class
-com/scc/flume/channel/kafkachannel/KafkaChannel$ConsumerAndRecords.class
