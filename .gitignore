@@ -1,0 +1,13 @@
+
+scc-flume/.project
+*.prefs
+*.classpath
+*.project
+*/settings
+*/settings/*
+*/disconf
+*/disconf/*
+*/logs
+*/logs/*
+*/target
+*/target/*
