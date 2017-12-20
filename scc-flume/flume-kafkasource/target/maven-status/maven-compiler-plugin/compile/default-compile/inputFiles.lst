@@ -1,4 +1,4 @@
-/Users/shangchengcai/workspace/githubworkspase/scc-flume/flume-kafkasource/src/main/java/com/scc/flume/source/kafkasource/KafkaSource.java
-/Users/shangchengcai/workspace/githubworkspase/scc-flume/flume-kafkasource/src/main/java/com/scc/flume/source/kafkasource/KafkaUtil.java
-/Users/shangchengcai/workspace/githubworkspase/scc-flume/flume-kafkasource/src/main/java/com/scc/flume/source/kafkasource/TopicNameModel.java
-/Users/shangchengcai/workspace/githubworkspase/scc-flume/flume-kafkasource/src/main/java/com/scc/flume/source/kafkasource/StrUtil.java
+/Users/shangchengcai/workspace/github/flume-es/scc-flume/flume-kafkasource/src/main/java/com/scc/flume/source/kafkasource/StrUtil.java
+/Users/shangchengcai/workspace/github/flume-es/scc-flume/flume-kafkasource/src/main/java/com/scc/flume/source/kafkasource/KafkaSource.java
+/Users/shangchengcai/workspace/github/flume-es/scc-flume/flume-kafkasource/src/main/java/com/scc/flume/source/kafkasource/KafkaUtil.java
+/Users/shangchengcai/workspace/github/flume-es/scc-flume/flume-kafkasource/src/main/java/com/scc/flume/source/kafkasource/TopicNameModel.java

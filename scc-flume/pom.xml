@@ -8,6 +8,7 @@
 	<modules>
 		<module>flume-kafkasource</module>
 		<module>flume-essink</module>
+		<module>flume-kafkachannel</module>
 	</modules>
 	<build>
 		<plugins>

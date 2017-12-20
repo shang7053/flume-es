@@ -1,0 +1,5 @@
+com/scc/flume/source/kafkasource/TopicNameModel.class
+com/scc/flume/source/kafkasource/KafkaUtil.class
+com/scc/flume/source/kafkasource/KafkaSource.class
+com/scc/flume/source/kafkasource/StrUtil.class
+com/scc/flume/source/kafkasource/KafkaUtil$1.class
