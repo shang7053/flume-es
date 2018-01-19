@@ -148,7 +148,6 @@ public class KafkaSource extends AbstractPollableSource implements Configurable 
 		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, this.value_deserializer);
 		this.consumer = new KafkaConsumer<>(props);
 		this.kafkaUtil = new KafkaUtil(this.consumer, this.topic_prefix, this.topic_suffix);
-		LOGGER.info("load pre-topic set,pre={}", this.topic_prefix);
 		Set<String> topicsSet = this.getTopicSet();
 		Preconditions.checkArgument(topicsSet.size() > 0, "can not match topic from kafka!please check you config!");
 		// first poll will cost a lot time,so init it first，and avoid org.apache.kafka.common.errors.InterruptException:
@@ -168,15 +167,16 @@ public class KafkaSource extends AbstractPollableSource implements Configurable 
 	 */
 	private Set<String> getTopicSet() {
 		Set<String> topicsSet = new HashSet<>();
+		LOGGER.debug("load pre-topic set,pre={}", this.topic_prefix);
 		if (StringUtils.isNotBlank(this.topic_prefix)) {
 			topicsSet.addAll(this.kafkaUtil.getTopics(TopicNameModel.PREFIX));
 		}
-		LOGGER.info("load suf-topic set,pre={}", this.topic_suffix);
-		if (StringUtils.isNotBlank(this.topic_prefix)) {
+		LOGGER.debug("load suf-topic set,suffix={}", this.topic_suffix);
+		if (StringUtils.isNotBlank(this.topic_suffix)) {
 			topicsSet.addAll(this.kafkaUtil.getTopics(TopicNameModel.SUFFIX));
 		}
-		LOGGER.info("load topics set,topics={}", this.topics);
-		if (StringUtils.isNotBlank(this.topic_prefix)) {
+		LOGGER.debug("load topics set,topics={}", this.topics);
+		if (StringUtils.isNotBlank(this.topics)) {
 			topicsSet.addAll(this.splitStr2Set(this.topics));
 		}
 		return topicsSet;
