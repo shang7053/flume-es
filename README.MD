@@ -18,12 +18,9 @@ agent.sources.s1.topic.prefix=log_
 #agent.sources.s1.topic.suffix=log_  
 #agent.sources.s1.topics=aa,bb,cc  
   
-agent.channels.c1.type=com.scc.flume.channel.kafkachannel.KafkaChannel    
-agent.channels.c1.capacity=10000    
-agent.channels.c1.transactionCapacity=1000    
-agent.channels.c1.brokerList=172.16.40.4:9092   
-agent.channels.c1.topic=flume_channel_log4j2flume  
-agent.channels.c1.zookeeperConnect=172.16.40.4:2181   
+agent.channels.c1.type=com.scc.flume.channel.kafkachannel.KafkaChannel          
+agent.channels.c1.bootstrap.servers = 172.16.40.4:9092,172.16.40.5:9092  
+agent.channels.c1.topic=flume_channel_log4j2flume   
   
 #自动拿topic当index，type为kafka_flume_log  
 agent.sinks.k1.type = com.scc.flume.sink.essink.EsSink  
