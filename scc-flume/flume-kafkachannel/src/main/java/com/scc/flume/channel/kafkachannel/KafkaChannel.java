@@ -5,7 +5,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import org.apache.flume.Context;
@@ -19,10 +24,12 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,7 +57,7 @@ public class KafkaChannel extends BasicChannelSemantics {
 	 */
 	@Override
 	protected BasicTransactionSemantics createTransaction() {
-		return new NullTransaction();
+		return new KafkaTransaction();
 	}
 
 	/*
@@ -80,7 +87,15 @@ public class KafkaChannel extends BasicChannelSemantics {
 			if ((groupid == null) || (groupid.isEmpty())) {
 				groupid = "flume";
 			}
-			LOGGER.info("groupid={}", groupid);
+			String capacity = context.getString("capacity");
+			if ((capacity == null) || (capacity.isEmpty())) {
+				capacity = "100";
+			}
+			if (Long.valueOf(capacity) > 1000) {
+				capacity = "1000";
+				LOGGER.warn("capacity MAX is 1000,now set capacity = 1000,because too MAX capacity will OOM!");
+			}
+			LOGGER.info("capacity={}", capacity);
 			LOGGER.info("create producer client……");
 			// create producer client
 			Properties producerPro = new Properties();
@@ -99,9 +114,9 @@ public class KafkaChannel extends BasicChannelSemantics {
 			Properties consumerPro = new Properties();
 			consumerPro.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
 			consumerPro.put(ConsumerConfig.GROUP_ID_CONFIG, groupid);
-			consumerPro.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
-			consumerPro.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, "1000");
-			consumerPro.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "1");
+			consumerPro.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+			consumerPro.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, "5000");
+			consumerPro.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, capacity);
 			consumerPro.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
 			consumerPro.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
 			this.consumer = new KafkaConsumer<>(consumerPro);
@@ -127,7 +142,11 @@ public class KafkaChannel extends BasicChannelSemantics {
 		this.consumer.close();
 	}
 
-	private class NullTransaction extends BasicTransactionSemantics {
+	private class KafkaTransaction extends BasicTransactionSemantics {
+		private Map<Integer, Long> lastOffsetMap = new HashMap<>();
+		private Map<Integer, Long> startOffsetMap = new HashMap<>();
+		private long dataSize;
+
 		/*
 		 * (非 Javadoc) <p>Title: doPut</p> <p>Description: </p>
 		 * 
@@ -173,10 +192,30 @@ public class KafkaChannel extends BasicChannelSemantics {
 		protected Event doTake() throws InterruptedException {
 			LOGGER.debug("-------------------------take channel data start-------------------------");
 			try {
-				KafkaChannel.this.consumer.subscribe(Arrays.asList(KafkaChannel.this.topic));
-				KafkaChannel.this.records = KafkaChannel.this.consumer.poll(1);
-				for (ConsumerRecord<byte[], byte[]> record : KafkaChannel.this.records) {
-					return this.deserializeValue(record.value());
+				List<Map<String, Object>> datas = new ArrayList<>();
+				KafkaChannel.this.records = KafkaChannel.this.consumer.poll(Long.MAX_VALUE);
+				for (TopicPartition partition : KafkaChannel.this.records.partitions()) {
+					List<ConsumerRecord<byte[], byte[]>> partitionRecords = KafkaChannel.this.records
+							.records(partition);
+					if (partitionRecords.size() == 0) {
+						LOGGER.debug("partition={},no new data,continue next partition", partition);
+						this.lastOffsetMap.put(partition.partition(), 0L);
+						this.startOffsetMap.put(partition.partition(), 0L);
+						continue;
+					}
+					for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
+						datas.add(this.deserializeValue(record.value()));
+					}
+					long startOffset = partitionRecords.get(0).offset();
+					long lastOffset = partitionRecords.get(partitionRecords.size() - 1).offset();
+					this.lastOffsetMap.put(partition.partition(), lastOffset);
+					this.startOffsetMap.put(partition.partition(), startOffset);
+					LOGGER.debug("get data from partition={} startOffset={}，lastOffset={}",
+							new Object[] { partition.partition(), startOffset, lastOffset });
+				}
+				this.dataSize = KafkaChannel.this.records.count();
+				if (this.dataSize > 0) {
+					return EventBuilder.withBody(this.serializeValue(datas), null);
 				}
 			} catch (Exception e) {
 				e.printStackTrace();
@@ -195,7 +234,24 @@ public class KafkaChannel extends BasicChannelSemantics {
 		 */
 		@Override
 		protected void doCommit() throws InterruptedException {
-			LOGGER.debug("kakfa auto commit,don't need call doCommit for commit!");
+			if (this.dataSize > 0) {
+				LOGGER.debug("start commit!dataSize={}", this.dataSize);
+				for (TopicPartition partition : KafkaChannel.this.records.partitions()) {
+					long startOffset = this.startOffsetMap.get(partition.partition());
+					long lastOffset = this.lastOffsetMap.get(partition.partition());
+					LOGGER.debug("prepare Commit partition ={} ,startOffset={},lastOffset={}",
+							new Object[] { partition.partition(), startOffset, lastOffset });
+					if (lastOffset - startOffset == 0) {
+						LOGGER.debug("partition ={} no data need commit!,continue next partition!",
+								new Object[] { partition.partition() });
+						continue;
+					}
+					KafkaChannel.this.consumer
+							.commitSync(Collections.singletonMap(partition, new OffsetAndMetadata(lastOffset + 1)));
+					LOGGER.info("commit partition ={} ,offset to lastOffset={} success! commit size ={}",
+							new Object[] { partition.partition(), lastOffset, this.dataSize });
+				}
+			}
 		}
 
 		/*
@@ -207,24 +263,48 @@ public class KafkaChannel extends BasicChannelSemantics {
 		 */
 		@Override
 		protected void doRollback() throws InterruptedException {
-			LOGGER.debug("kakfa auto commit,don't need call doRollback for Rollback!");
+			if (this.dataSize > 0) {
+				LOGGER.debug("start doRollback!dataSize={}", this.dataSize);
+				// KafkaChannel.this.consumer.commitSync();
+				for (TopicPartition partition : KafkaChannel.this.records.partitions()) {
+					long startOffset = this.startOffsetMap.get(partition.partition());
+					long lastOffset = this.lastOffsetMap.get(partition.partition());
+					LOGGER.debug("prepare Rollback partition ={} ,startOffset={},lastOffset={}",
+							new Object[] { partition.partition(), startOffset, lastOffset });
+					if (lastOffset - startOffset == 0) {
+						LOGGER.debug("partition ={} no data need commit!,continue next partition!",
+								new Object[] { partition.partition() });
+						continue;
+					}
+					KafkaChannel.this.consumer.seek(partition, startOffset);
+					// .commitSync(Collections.singletonMap(partition, new OffsetAndMetadata(startOffset)));
+					LOGGER.info("doRollback rollbak partition ={} ,offset to startOffset={} success!commit size ={}",
+							new Object[] { partition.partition(), startOffset, this.dataSize });
+				}
+			}
 		}
 
 		private byte[] serializeValue(Event event) throws IOException {
-			LogData data = new LogData();
-			data.setHeaders(event.getHeaders());
-			data.setBody(event.getBody());
+			Map<String, Object> data = new HashMap<>();
+			data.put("headers", event.getHeaders());
+			data.put("body", event.getBody());
 			ByteArrayOutputStream obj = new ByteArrayOutputStream();
 			ObjectOutputStream out = new ObjectOutputStream(obj);
 			out.writeObject(data);
 			return obj.toByteArray();
 		}
 
-		private Event deserializeValue(byte[] value) throws IOException, ClassNotFoundException {
+		private byte[] serializeValue(List<Map<String, Object>> datas) throws IOException {
+			ByteArrayOutputStream obj = new ByteArrayOutputStream();
+			ObjectOutputStream out = new ObjectOutputStream(obj);
+			out.writeObject(datas);
+			return obj.toByteArray();
+		}
+
+		private Map<String, Object> deserializeValue(byte[] value) throws IOException, ClassNotFoundException {
 			ByteArrayInputStream bin = new ByteArrayInputStream(value);
 			ObjectInputStream obin = new ObjectInputStream(bin);
-			LogData data = (LogData) obin.readObject();
-			return EventBuilder.withBody(data.getBody(), data.getHeaders());
+			return (Map<String, Object>) obin.readObject();
 		}
 	}
 

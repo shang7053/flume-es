@@ -2,9 +2,14 @@ package com.scc.flume.sink.essink;
 
 import static org.elasticsearch.common.xcontent.XContentFactory.*;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -15,7 +20,8 @@ import org.apache.flume.EventDeliveryException;
 import org.apache.flume.Transaction;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.sink.AbstractSink;
-import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.action.bulk.BulkRequestBuilder;
+import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
@@ -53,6 +59,7 @@ public class EsSink extends AbstractSink implements Configurable {
 		LOGGER.debug("-------------------start es process--------------------");
 		Channel channel = this.getChannel();
 		Transaction transaction = channel.getTransaction();
+		List<XContentBuilder> datas = new ArrayList<XContentBuilder>();
 		try {
 			transaction.begin();
 			Event event = channel.take();
@@ -61,34 +68,51 @@ public class EsSink extends AbstractSink implements Configurable {
 				transaction.commit();
 				return Status.READY;
 			}
-			LOGGER.info("recive a event");
-			Map<String, String> headers = event.getHeaders();
-			XContentBuilder builder = jsonBuilder().startObject();
-			byte[] body = event.getBody();
-			builder.field("@message", new String(body));
-			for (Entry<String, String> header : headers.entrySet()) {
-				if (header.getKey().equals("@timestamp")) {
-					builder.field(header.getKey(), new Date(Long.valueOf(header.getValue())));
-				} else {
-					builder.field(header.getKey(), header.getValue());
-				}
+			List<Map<String, Object>> events = this.deserializeValue(event.getBody());
+			LOGGER.info("sink get a event from channel,size={}", events.size());
+			if (events.size() < 1) {
+				LOGGER.debug("no event recive……");
+				transaction.commit();
+				return Status.READY;
 			}
-			builder.endObject();
-			IndexResponse response = this.client.prepareIndex(headers.get("@topic"), "kafka_flume_log")
-					.setSource(builder).get();
-			LOGGER.info("add data to es ,response={}", response);
-			LOGGER.info("response status={}", response.status());
+			BulkRequestBuilder bulkRequest = this.client.prepareBulk();
+			for (Map<String, Object> e : events) {
+				XContentBuilder builder = jsonBuilder().startObject();
+				byte[] body = (byte[]) e.get("body");
+				Map<String, String> headers = (Map<String, String>) e.get("headers");
+				builder.field("@message", new String(body));
+				for (Entry<String, String> header : headers.entrySet()) {
+					if (header.getKey().equals("@timestamp")) {
+						builder.field(header.getKey(), new Date(Long.valueOf(header.getValue())));
+					} else {
+						builder.field(header.getKey(), header.getValue());
+					}
+				}
+				builder.endObject();
+				datas.add(builder);
+				bulkRequest.add(this.client.prepareIndex(headers.get("@topic"), "kafka_flume_log").setSource(builder));
+			}
+			BulkResponse bulkResponse = bulkRequest.execute().actionGet();
+			LOGGER.info("add data to es ,response status={}", bulkResponse);
 			transaction.commit();
-			builder.close();
 		} catch (Exception e) {
 			LOGGER.error("process es sink happended a error!{}", e);
 			transaction.rollback();
 			return Status.BACKOFF;
 		} finally {
 			transaction.close();
+			for (XContentBuilder builder : datas) {
+				builder.close();
+			}
 		}
 		LOGGER.debug("-------------------end es process--------------------");
 		return Status.READY;
+	}
+
+	private List<Map<String, Object>> deserializeValue(byte[] value) throws IOException, ClassNotFoundException {
+		ByteArrayInputStream bin = new ByteArrayInputStream(value);
+		ObjectInputStream obin = new ObjectInputStream(bin);
+		return (List<Map<String, Object>>) obin.readObject();
 	}
 
 	/*

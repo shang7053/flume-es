@@ -79,7 +79,7 @@ public class KafkaSource extends AbstractPollableSource implements Configurable 
 				headers.put("@offset", Long.valueOf(record.offset()).toString());
 				events.add(EventBuilder.withBody(msg.getBytes(), headers));
 			}
-			LOGGER.info("events size={}", events.size());
+			LOGGER.info("source events size={},now put it to channel!", events.size());
 			this.getChannelProcessor().processEventBatch(events);
 		} catch (Exception e) {
 			LOGGER.error("process error!{}", e);
