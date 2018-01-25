@@ -93,7 +93,7 @@ public class EsSink extends AbstractSink implements Configurable {
 				bulkRequest.add(this.client.prepareIndex(headers.get("@topic"), "kafka_flume_log").setSource(builder));
 			}
 			BulkResponse bulkResponse = bulkRequest.execute().actionGet();
-			LOGGER.info("add data to es ,response status={}", bulkResponse);
+			LOGGER.info("add data to es ,response status={}", bulkResponse.status());
 			transaction.commit();
 		} catch (Exception e) {
 			LOGGER.error("process es sink happended a error!{}", e);

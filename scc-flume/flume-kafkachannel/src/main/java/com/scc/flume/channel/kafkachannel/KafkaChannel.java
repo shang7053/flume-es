@@ -85,8 +85,9 @@ public class KafkaChannel extends BasicChannelSemantics {
 			LOGGER.info("topic={}", this.topic);
 			String groupid = context.getString("groupid");
 			if ((groupid == null) || (groupid.isEmpty())) {
-				groupid = "flume";
+				groupid = "flume_channel";
 			}
+			LOGGER.info("groupid={}", groupid);
 			String capacity = context.getString("capacity");
 			if ((capacity == null) || (capacity.isEmpty())) {
 				capacity = "100";
@@ -214,6 +215,7 @@ public class KafkaChannel extends BasicChannelSemantics {
 							new Object[] { partition.partition(), startOffset, lastOffset });
 				}
 				this.dataSize = KafkaChannel.this.records.count();
+				LOGGER.info("doTake dataSize {}", this.dataSize);
 				if (this.dataSize > 0) {
 					return EventBuilder.withBody(this.serializeValue(datas), null);
 				}
@@ -234,18 +236,15 @@ public class KafkaChannel extends BasicChannelSemantics {
 		 */
 		@Override
 		protected void doCommit() throws InterruptedException {
+			LOGGER.info("doCommit dataSize {},partitions size {}", this.dataSize,
+					KafkaChannel.this.records.partitions().size());
 			if (this.dataSize > 0) {
-				LOGGER.debug("start commit!dataSize={}", this.dataSize);
+				LOGGER.info("start commit!dataSize={}", this.dataSize);
 				for (TopicPartition partition : KafkaChannel.this.records.partitions()) {
 					long startOffset = this.startOffsetMap.get(partition.partition());
 					long lastOffset = this.lastOffsetMap.get(partition.partition());
-					LOGGER.debug("prepare Commit partition ={} ,startOffset={},lastOffset={}",
+					LOGGER.info("prepare Commit partition ={} ,startOffset={},lastOffset={}",
 							new Object[] { partition.partition(), startOffset, lastOffset });
-					if (lastOffset - startOffset == 0) {
-						LOGGER.debug("partition ={} no data need commit!,continue next partition!",
-								new Object[] { partition.partition() });
-						continue;
-					}
 					KafkaChannel.this.consumer
 							.commitSync(Collections.singletonMap(partition, new OffsetAndMetadata(lastOffset + 1)));
 					LOGGER.info("commit partition ={} ,offset to lastOffset={} success! commit size ={}",
@@ -263,6 +262,7 @@ public class KafkaChannel extends BasicChannelSemantics {
 		 */
 		@Override
 		protected void doRollback() throws InterruptedException {
+			LOGGER.info("doRollback dataSize {}", this.dataSize);
 			if (this.dataSize > 0) {
 				LOGGER.debug("start doRollback!dataSize={}", this.dataSize);
 				// KafkaChannel.this.consumer.commitSync();
