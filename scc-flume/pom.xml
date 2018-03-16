@@ -9,6 +9,7 @@
 		<module>flume-kafkasource</module>
 		<module>flume-essink</module>
 		<module>flume-kafkachannel</module>
+		<module>flume-rabbitchannel</module>
 	</modules>
 	<build>
 		<plugins>
