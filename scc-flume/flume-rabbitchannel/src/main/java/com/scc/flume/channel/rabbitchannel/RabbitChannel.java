@@ -45,6 +45,7 @@ public class RabbitChannel extends BasicChannelSemantics {
 	private String exchangename;
 	private String queuename;
 	private String routingkey;
+	private String exchangetype;
 
 	/*
 	 * (非 Javadoc) <p>Title: createTransaction</p> <p>Description: </p>
@@ -75,7 +76,7 @@ public class RabbitChannel extends BasicChannelSemantics {
 			String pwd = context.getString("pwd");
 			String virtualHost = context.getString("virtualHost", "/");
 			this.exchangename = context.getString("exchange.name");
-			String exchangetype = context.getString("exchange.type", "direct");
+			this.exchangetype = context.getString("exchange.type", "direct");
 			this.queuename = context.getString("queuename");
 			this.routingkey = context.getString("routingkey");
 			if ((address == null) || (address.isEmpty())) {
@@ -90,7 +91,7 @@ public class RabbitChannel extends BasicChannelSemantics {
 			if ((this.exchangename == null) || (this.exchangename.isEmpty())) {
 				throw new ConfigurationException("exchangename must be specified");
 			}
-			if ((exchangetype == null) || (exchangetype.isEmpty())) {
+			if ((this.exchangetype == null) || (this.exchangetype.isEmpty())) {
 				throw new ConfigurationException("exchangetype must be specified");
 			}
 			if ((this.queuename == null) || (this.queuename.isEmpty())) {
@@ -106,7 +107,7 @@ public class RabbitChannel extends BasicChannelSemantics {
 			LOGGER.info("get config pwd={}", pwd);
 			LOGGER.info("get config virtualHost={}", virtualHost);
 			LOGGER.info("get config exchangename={}", this.exchangename);
-			LOGGER.info("get config exchangetype={}", exchangetype);
+			LOGGER.info("get config exchangetype={}", this.exchangetype);
 			LOGGER.info("get config queuename={}", this.queuename);
 			LOGGER.info("get config routingkey={}", this.queuename);
 			List<Address> addresses = new ArrayList<>();
@@ -126,13 +127,13 @@ public class RabbitChannel extends BasicChannelSemantics {
 			LOGGER.info("create rabbit Connection……");
 			this.connection = this.factory.newConnection(addresses.toArray(new Address[addresses.size()]));
 			this.producerChannel = this.connection.createChannel();
-			this.producerChannel.exchangeDeclare(this.exchangename, exchangetype, true, false, null);
+			this.producerChannel.exchangeDeclare(this.exchangename, this.exchangetype, true, false, null);
 			this.producerChannel.queueDeclare(this.queuename, true, false, false, null);
 			this.producerChannel.queueBind(this.queuename, this.exchangename, this.routingkey);
 
 			this.customerChannel = this.connection.createChannel();
 			// 声明一个交换器
-			this.customerChannel.exchangeDeclare(this.exchangename, exchangetype, true, false, null);
+			this.customerChannel.exchangeDeclare(this.exchangename, this.exchangetype, true, false, null);
 			// 声明一个持久化的队列
 			this.customerChannel.queueDeclare(this.exchangename, true, false, false, null);
 			// 绑定队列，通过键 hola 将队列和交换器绑定起来
@@ -202,6 +203,18 @@ public class RabbitChannel extends BasicChannelSemantics {
 		protected Event doTake() throws InterruptedException {
 			LOGGER.debug("-------------------------take channel data start-------------------------");
 			try {
+				if (!RabbitChannel.this.customerChannel.isOpen()) {
+					RabbitChannel.this.customerChannel = RabbitChannel.this.connection.createChannel();
+					// 声明一个交换器
+					RabbitChannel.this.customerChannel.exchangeDeclare(RabbitChannel.this.exchangename,
+							RabbitChannel.this.exchangetype, true, false, null);
+					// 声明一个持久化的队列
+					RabbitChannel.this.customerChannel.queueDeclare(RabbitChannel.this.exchangename, true, false, false,
+							null);
+					// 绑定队列，通过键 hola 将队列和交换器绑定起来
+					RabbitChannel.this.customerChannel.queueBind(RabbitChannel.this.queuename,
+							RabbitChannel.this.exchangename, RabbitChannel.this.routingkey);
+				}
 				GetResponse response = RabbitChannel.this.customerChannel.basicGet(RabbitChannel.this.queuename, false);
 				if (null == response) {
 					LOGGER.debug("null response,will be return!");
@@ -257,7 +270,14 @@ public class RabbitChannel extends BasicChannelSemantics {
 		 */
 		@Override
 		protected void doRollback() throws InterruptedException {
-			LOGGER.debug("don't ask is mean rollback!");
+			LOGGER.debug("don't ask and close the channel is mean rollback!");
+			if (RabbitChannel.this.customerChannel.isOpen()) {
+				try {
+					RabbitChannel.this.customerChannel.close();
+				} catch (IOException | TimeoutException e) {
+					e.printStackTrace();
+				}
+			}
 		}
 
 		private byte[] serializeValue(Event event) throws IOException {
