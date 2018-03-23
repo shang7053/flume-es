@@ -17,10 +17,20 @@ agent.sources.s1.group.id = flume
 agent.sources.s1.topic.prefix=log_  
 #agent.sources.s1.topic.suffix=log_  
 #agent.sources.s1.topics=aa,bb,cc  
-  
-agent.channels.c1.type=com.scc.flume.channel.kafkachannel.KafkaChannel          
-agent.channels.c1.bootstrap.servers = 172.16.40.4:9092,172.16.40.5:9092  
-agent.channels.c1.topic=flume_channel_log4j2flume   
+ 
+#kafkachannel
+#agent.channels.c1.type=com.scc.flume.channel.kafkachannel.KafkaChannel          
+#agent.channels.c1.bootstrap.servers = 172.16.40.4:9092,172.16.40.5:9092  
+#agent.channels.c1.topic=flume_channel_log4j2flume   
+
+#rabbitchannel
+agent.channels.c1.type=com.scc.flume.channel.rabbitchannel.RabbitChannel
+agent.channels.c1.capacity=100
+agent.channels.c1.address=172.16.40.2:5672,172.16.40.3:5672
+agent.channels.c1.uname=root
+agent.channels.c1.pwd=root
+agent.channels.c1.exchange.name=flume_channel_log
+
   
 #自动拿topic当index，type为kafka_flume_log  
 agent.sinks.k1.type = com.scc.flume.sink.essink.EsSink  
