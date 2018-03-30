@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.flume.Context;
@@ -25,8 +26,8 @@ import com.rabbitmq.client.Address;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.DefaultConsumer;
 import com.rabbitmq.client.Envelope;
-import com.rabbitmq.client.GetResponse;
 import com.rabbitmq.client.MessageProperties;
 
 /**
@@ -38,14 +39,18 @@ import com.rabbitmq.client.MessageProperties;
  */
 public class RabbitChannel extends BasicChannelSemantics {
 	private static final Logger LOGGER = LoggerFactory.getLogger(RabbitChannel.class);
+	private static final ConcurrentLinkedQueue QUEUE = new ConcurrentLinkedQueue();
 	private ConnectionFactory factory;
 	private Connection connection;
 	private Channel producerChannel;
-	private Channel customerChannel;
 	private String exchangename;
 	private String queuename;
 	private String routingkey;
 	private String exchangetype;
+	private Integer capacity;
+	private Integer maxtmpsize;
+	private Long delaytime;
+	private Integer customers;
 
 	/*
 	 * (非 Javadoc) <p>Title: createTransaction</p> <p>Description: </p>
@@ -79,6 +84,10 @@ public class RabbitChannel extends BasicChannelSemantics {
 			this.exchangetype = context.getString("exchange.type", "direct");
 			this.queuename = context.getString("queuename");
 			this.routingkey = context.getString("routingkey");
+			this.capacity = context.getInteger("capacity", 1);
+			this.maxtmpsize = context.getInteger("maxtmpsize", 100000);
+			this.delaytime = context.getLong("delaytime", 1000L);
+			this.customers = context.getInteger("customers", 2);
 			if ((address == null) || (address.isEmpty())) {
 				throw new ConfigurationException("address must be specified");
 			}
@@ -110,6 +119,9 @@ public class RabbitChannel extends BasicChannelSemantics {
 			LOGGER.info("get config exchangetype={}", this.exchangetype);
 			LOGGER.info("get config queuename={}", this.queuename);
 			LOGGER.info("get config routingkey={}", this.queuename);
+			LOGGER.info("get config capacity={}", this.capacity);
+			LOGGER.info("get config maxtmpsize={}", this.maxtmpsize);
+			LOGGER.info("get config customers={}", this.customers);
 			List<Address> addresses = new ArrayList<>();
 			String[] strAddresses = address.split(",");
 			for (String strAddress : strAddresses) {
@@ -131,13 +143,51 @@ public class RabbitChannel extends BasicChannelSemantics {
 			this.producerChannel.queueDeclare(this.queuename, true, false, false, null);
 			this.producerChannel.queueBind(this.queuename, this.exchangename, this.routingkey);
 
-			this.customerChannel = this.connection.createChannel();
-			// 声明一个交换器
-			this.customerChannel.exchangeDeclare(this.exchangename, this.exchangetype, true, false, null);
-			// 声明一个持久化的队列
-			this.customerChannel.queueDeclare(this.exchangename, true, false, false, null);
-			// 绑定队列，通过键 hola 将队列和交换器绑定起来
-			this.customerChannel.queueBind(this.queuename, this.exchangename, this.routingkey);
+			for (int i = 0; i < this.customers; i++) {
+				Channel customerChannel = this.connection.createChannel();
+				// 声明一个交换器
+				customerChannel.exchangeDeclare(this.exchangename, this.exchangetype, true, false, null);
+				// 声明一个持久化的队列
+				customerChannel.queueDeclare(this.exchangename, true, false, false, null);
+				// 绑定队列，通过键 hola 将队列和交换器绑定起来
+				customerChannel.queueBind(this.queuename, this.exchangename, this.routingkey);
+				customerChannel.basicConsume(this.queuename, true, new DefaultConsumer(customerChannel) {
+
+					/*
+					 * (非 Javadoc) <p>Title: handleDelivery</p> <p>Description: </p>
+					 * 
+					 * @param consumerTag
+					 * 
+					 * @param envelope
+					 * 
+					 * @param properties
+					 * 
+					 * @param body
+					 * 
+					 * @throws IOException
+					 * 
+					 * @see com.rabbitmq.client.DefaultConsumer#handleDelivery(java.lang.String,
+					 * com.rabbitmq.client.Envelope, com.rabbitmq.client.AMQP.BasicProperties, byte[])
+					 */
+					@Override
+					public void handleDelivery(String consumerTag, Envelope envelope, BasicProperties properties,
+							byte[] body) throws IOException {
+						LOGGER.debug("channel message MessageId={}", properties.getMessageId());
+						LOGGER.debug("channel message RoutingKey={}", envelope.getRoutingKey());
+						LOGGER.debug("channel message ContentType={}", properties.getContentType());
+						QUEUE.add(body);
+						LOGGER.info("queue size ={}", QUEUE.size());
+						if (QUEUE.size() > RabbitChannel.this.maxtmpsize) {
+							LOGGER.info("too many message!sleep for {}ms", RabbitChannel.this.delaytime);
+							try {
+								Thread.sleep(RabbitChannel.this.delaytime);
+							} catch (InterruptedException e) {
+								e.printStackTrace();
+							}
+						}
+					}
+				});
+			}
 		} catch (Exception e) {
 			LOGGER.error(e.getMessage(), e);
 			e.printStackTrace();
@@ -156,16 +206,16 @@ public class RabbitChannel extends BasicChannelSemantics {
 		super.stop();
 		try {
 			this.producerChannel.close();
-			this.customerChannel.close();
 			this.connection.close();
-		} catch (IOException | TimeoutException e) {
+			while (QUEUE.size() > 0) {
+				Thread.sleep(1000l);
+			}
+		} catch (IOException | TimeoutException | InterruptedException e) {
 			e.printStackTrace();
 		}
 	}
 
 	private class RabbitTransaction extends BasicTransactionSemantics {
-		private long deliveryTag;
-
 		/*
 		 * (非 Javadoc) <p>Title: doPut</p> <p>Description: </p>
 		 * 
@@ -182,7 +232,7 @@ public class RabbitChannel extends BasicChannelSemantics {
 				byte[] data = this.serializeValue(event);
 				RabbitChannel.this.producerChannel.basicPublish(RabbitChannel.this.exchangename,
 						RabbitChannel.this.routingkey, MessageProperties.PERSISTENT_TEXT_PLAIN, data);
-				LOGGER.info("put event to channel success!data legth={}KB", data.length / 1024);
+				LOGGER.info("put event to channel success!data legth={}B", data.length);
 			} catch (Exception e) {
 				LOGGER.error(e.getMessage(), e);
 				e.printStackTrace();
@@ -203,35 +253,19 @@ public class RabbitChannel extends BasicChannelSemantics {
 		protected Event doTake() throws InterruptedException {
 			LOGGER.debug("-------------------------take channel data start-------------------------");
 			try {
-				if (!RabbitChannel.this.customerChannel.isOpen()) {
-					RabbitChannel.this.customerChannel = RabbitChannel.this.connection.createChannel();
-					// 声明一个交换器
-					RabbitChannel.this.customerChannel.exchangeDeclare(RabbitChannel.this.exchangename,
-							RabbitChannel.this.exchangetype, true, false, null);
-					// 声明一个持久化的队列
-					RabbitChannel.this.customerChannel.queueDeclare(RabbitChannel.this.exchangename, true, false, false,
-							null);
-					// 绑定队列，通过键 hola 将队列和交换器绑定起来
-					RabbitChannel.this.customerChannel.queueBind(RabbitChannel.this.queuename,
-							RabbitChannel.this.exchangename, RabbitChannel.this.routingkey);
+
+				List<Map<String, Object>> datas = new ArrayList<>();
+				for (int i = 0; i < RabbitChannel.this.capacity; i++) {
+					byte[] body = (byte[]) QUEUE.poll();
+					if (null == body) {
+						LOGGER.debug("no new message,will be break! current enevt size is {}", datas.size());
+						break;
+					}
+					datas.add(RabbitTransaction.this.deserializeValue(body));
 				}
-				GetResponse response = RabbitChannel.this.customerChannel.basicGet(RabbitChannel.this.queuename, false);
-				if (null == response) {
-					LOGGER.debug("null response,will be return!");
-					return null;
+				if (datas.size() > 0) {
+					return EventBuilder.withBody(this.serializeValue(datas), null);
 				}
-				Envelope envelope = response.getEnvelope();
-				BasicProperties properties = response.getProps();
-				byte[] body = response.getBody();
-				LOGGER.debug("channel message MessageId={}", properties.getMessageId());
-				LOGGER.debug("channel message RoutingKey={}", envelope.getRoutingKey());
-				LOGGER.debug("channel message ContentType={}", properties.getContentType());
-				LOGGER.info("channel message Lag MessageCount={}", response.getMessageCount());
-				RabbitTransaction.this.deliveryTag = envelope.getDeliveryTag();
-				LOGGER.debug("channel message deliveryTag：" + RabbitTransaction.this.deliveryTag);
-				Map<String, Object> datamap = RabbitTransaction.this.deserializeValue(body);
-				return EventBuilder.withBody((byte[]) datamap.get("body"),
-						(Map<String, String>) datamap.get("headers"));
 			} catch (Exception e) {
 				LOGGER.error(e.getMessage(), e);
 				e.printStackTrace();
@@ -250,15 +284,6 @@ public class RabbitChannel extends BasicChannelSemantics {
 		@Override
 		protected void doCommit() throws InterruptedException {
 			// 确认消息
-			try {
-				if (this.deliveryTag != 0) {
-					RabbitChannel.this.customerChannel.basicAck(this.deliveryTag, false);
-					LOGGER.info("ask channel success! deliveryTag={}", this.deliveryTag);
-				}
-			} catch (IOException e) {
-				LOGGER.error(e.getMessage(), e);
-				e.printStackTrace();
-			}
 		}
 
 		/*
@@ -270,14 +295,14 @@ public class RabbitChannel extends BasicChannelSemantics {
 		 */
 		@Override
 		protected void doRollback() throws InterruptedException {
-			LOGGER.debug("don't ask and close the channel is mean rollback!");
-			if (RabbitChannel.this.customerChannel.isOpen()) {
-				try {
-					RabbitChannel.this.customerChannel.close();
-				} catch (IOException | TimeoutException e) {
-					e.printStackTrace();
-				}
-			}
+			// 无需事物
+		}
+
+		private byte[] serializeValue(List<Map<String, Object>> datas) throws IOException {
+			ByteArrayOutputStream obj = new ByteArrayOutputStream();
+			ObjectOutputStream out = new ObjectOutputStream(obj);
+			out.writeObject(datas);
+			return obj.toByteArray();
 		}
 
 		private byte[] serializeValue(Event event) throws IOException {
@@ -293,7 +318,8 @@ public class RabbitChannel extends BasicChannelSemantics {
 		private Map<String, Object> deserializeValue(byte[] value) throws IOException, ClassNotFoundException {
 			ByteArrayInputStream bin = new ByteArrayInputStream(value);
 			ObjectInputStream obin = new ObjectInputStream(bin);
-			return (Map<String, Object>) obin.readObject();
+			Map<String, Object> event = (Map<String, Object>) obin.readObject();
+			return event;
 		}
 	}
 

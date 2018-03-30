@@ -68,10 +68,10 @@ public class KafkaSource extends AbstractPollableSource implements Configurable 
 			if (this.records.isEmpty()) {
 				return Status.READY;
 			}
-			Map<String, String> headers = new HashMap<>();
 			List<Event> events = new ArrayList<>();
 			for (ConsumerRecord<String, String> record : this.records) {
 				String msg = record.value();
+				Map<String, String> headers = new HashMap<>();
 				headers.put("@topic", record.topic());
 				headers.put("@timestamp", Long.valueOf(StrUtil.getFirstDate(msg).getTime()).toString());
 				headers.put("@ip", StrUtil.getFirstIp(msg));
