@@ -1,4 +1,4 @@
-package com.scc.flume.channel.rabbitchannel;
+package com.scc.flume.source.rabbit;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -6,18 +6,18 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.flume.Context;
-import org.apache.flume.Event;
-import org.apache.flume.channel.BasicChannelSemantics;
-import org.apache.flume.channel.BasicTransactionSemantics;
+import org.apache.flume.EventDeliveryException;
+import org.apache.flume.FlumeException;
+import org.apache.flume.conf.Configurable;
 import org.apache.flume.conf.ConfigurationException;
 import org.apache.flume.event.EventBuilder;
+import org.apache.flume.source.AbstractPollableSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,22 +28,20 @@ import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.DefaultConsumer;
 import com.rabbitmq.client.Envelope;
-import com.rabbitmq.client.MessageProperties;
 
 /**
- * @ClassName: rabbitChannel2
+ * @ClassName: KafkaSource
  * @Description: TODO(这里用一句话描述这个类的作用)
  * @author shangchengcai@voole.com
- * @date 2018年1月19日 下午2:27:43
+ * @date 2017年12月18日 上午9:40:46
  * 
  */
-public class RabbitChannel extends BasicChannelSemantics {
-	private static final Logger LOGGER = LoggerFactory.getLogger(RabbitChannel.class);
+public class RabbitSource extends AbstractPollableSource implements Configurable {
+	private static final Logger LOGGER = LoggerFactory.getLogger(RabbitSource.class);
 	private static final ConcurrentLinkedQueue QUEUE = new ConcurrentLinkedQueue();
+	private List<Channel> constomerChannels = new ArrayList<>();
 	private ConnectionFactory factory;
 	private Connection connection;
-	private Channel producerChannel;
-	private List<Channel> constomerChannels = new ArrayList<>();
 	private String exchangename;
 	private String queuename;
 	private String routingkey;
@@ -54,29 +52,53 @@ public class RabbitChannel extends BasicChannelSemantics {
 	private Integer customers;
 
 	/*
-	 * (非 Javadoc) <p>Title: createTransaction</p> <p>Description: </p>
+	 * (非 Javadoc) <p>Title: doProcess</p> <p>Description: </p>
 	 * 
 	 * @return
 	 * 
-	 * @see org.apache.flume.channel.BasicChannelSemantics#createTransaction()
+	 * @throws EventDeliveryException
+	 * 
+	 * @see org.apache.flume.source.AbstractPollableSource#doProcess()
 	 */
 	@Override
-	protected BasicTransactionSemantics createTransaction() {
-		return new RabbitTransaction();
+	protected Status doProcess() throws EventDeliveryException {
+		LOGGER.debug("-------------------------rabbit source get data start-------------------------");
+		try {
+			List<Map<String, Object>> datas = new ArrayList<>();
+			for (int i = 0; i < RabbitSource.this.capacity; i++) {
+				byte[] body = (byte[]) QUEUE.poll();
+				if (null == body) {
+					LOGGER.debug("no new message,will be break! current enevt size is {}", datas.size());
+					break;
+				}
+				datas.add(this.deserializeValue(body));
+			}
+			if (datas.size() > 0) {
+				this.getChannelProcessor().processEvent(EventBuilder.withBody(this.serializeValue(datas), null));
+			} else {
+				return Status.READY;
+			}
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			return Status.BACKOFF;
+		}
+		LOGGER.debug("-------------------------rabbit source get data end-------------------------");
+		return Status.READY;
 	}
 
 	/*
-	 * (非 Javadoc) <p>Title: configure</p> <p>Description: </p>
+	 * (非 Javadoc) <p>Title: doConfigure</p> <p>Description: </p>
 	 * 
 	 * @param context
 	 * 
-	 * @see org.apache.flume.channel.AbstractChannel#configure(org.apache.flume.Context)
+	 * @throws FlumeException
+	 * 
+	 * @see org.apache.flume.source.BasicSourceSemantics#doConfigure(org.apache.flume.Context)
 	 */
 	@Override
-	public void configure(Context context) {
-		LOGGER.info("=========================start config rabbit channel==============================");
+	protected void doConfigure(Context context) throws FlumeException {
+		LOGGER.info("=========================start config rabbit source==============================");
 		try {
-			super.configure(context);
 			String address = context.getString("address");
 			String uname = context.getString("uname");
 			String pwd = context.getString("pwd");
@@ -88,7 +110,7 @@ public class RabbitChannel extends BasicChannelSemantics {
 			this.capacity = context.getInteger("capacity", 1);
 			this.maxtmpsize = context.getInteger("maxtmpsize", 100000);
 			this.delaytime = context.getLong("delaytime", 1000L);
-			this.customers = context.getInteger("customers", 2);
+			this.customers = context.getInteger("customers", 1);
 			if ((address == null) || (address.isEmpty())) {
 				throw new ConfigurationException("address must be specified");
 			}
@@ -139,12 +161,26 @@ public class RabbitChannel extends BasicChannelSemantics {
 			this.factory.setVirtualHost(virtualHost);
 			LOGGER.info("create rabbit Connection……");
 			this.connection = this.factory.newConnection(addresses.toArray(new Address[addresses.size()]));
-			this.producerChannel = this.connection.createChannel();
-			this.producerChannel.exchangeDeclare(this.exchangename, this.exchangetype, true, false, null);
-			this.producerChannel.queueDeclare(this.queuename, true, false, false, null);
-			this.producerChannel.queueBind(this.queuename, this.exchangename, this.routingkey);
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			e.printStackTrace();
+			System.exit(1);
+		}
+		LOGGER.info("=========================end config rabbit source==============================");
+	}
 
-			for (int i = 0; i < this.customers; i++) {
+	/*
+	 * (非 Javadoc) <p>Title: doStart</p> <p>Description: </p>
+	 * 
+	 * @throws FlumeException
+	 * 
+	 * @see org.apache.flume.source.BasicSourceSemantics#doStart()
+	 */
+	@Override
+	protected void doStart() throws FlumeException {
+		LOGGER.info("-------------------do start rabbit source--------------------");
+		for (int i = 0; i < this.customers; i++) {
+			try {
 				Channel customerChannel = this.connection.createChannel();
 				this.constomerChannels.add(customerChannel);
 				// 声明一个交换器
@@ -179,35 +215,34 @@ public class RabbitChannel extends BasicChannelSemantics {
 						LOGGER.debug("channel message ContentType={}", properties.getContentType());
 						QUEUE.add(body);
 						LOGGER.info("queue size ={}", QUEUE.size());
-						if (QUEUE.size() > RabbitChannel.this.maxtmpsize) {
-							LOGGER.info("too many message!sleep for {}ms", RabbitChannel.this.delaytime);
+						if (QUEUE.size() > RabbitSource.this.maxtmpsize) {
+							LOGGER.info("too many message!sleep for {}ms", RabbitSource.this.delaytime);
 							try {
-								Thread.sleep(RabbitChannel.this.delaytime);
+								Thread.sleep(RabbitSource.this.delaytime);
 							} catch (InterruptedException e) {
 								e.printStackTrace();
 							}
 						}
 					}
 				});
+			} catch (IOException e1) {
+				e1.printStackTrace();
 			}
-		} catch (Exception e) {
-			LOGGER.error(e.getMessage(), e);
-			e.printStackTrace();
-			System.exit(1);
 		}
-		LOGGER.info("=========================end config rabbit channel==============================");
+		LOGGER.info("-------------------end do start rabbit source--------------------");
 	}
 
 	/*
-	 * (非 Javadoc) <p>Title: stop</p> <p>Description: </p>
+	 * (非 Javadoc) <p>Title: doStop</p> <p>Description: </p>
 	 * 
-	 * @see org.apache.flume.channel.AbstractChannel#stop()
+	 * @throws FlumeException
+	 * 
+	 * @see org.apache.flume.source.BasicSourceSemantics#doStop()
 	 */
 	@Override
-	public synchronized void stop() {
-		super.stop();
+	protected void doStop() throws FlumeException {
+		LOGGER.info("-------------------start stop rabbit source--------------------");
 		try {
-			this.producerChannel.close();
 			for (Channel channel : this.constomerChannels) {
 				channel.close();
 			}
@@ -215,117 +250,24 @@ public class RabbitChannel extends BasicChannelSemantics {
 			while (QUEUE.size() > 0) {
 				Thread.sleep(1000l);
 			}
-		} catch (IOException | TimeoutException | InterruptedException e) {
+		} catch (IOException | InterruptedException | TimeoutException e) {
 			e.printStackTrace();
 		}
+		LOGGER.info("-------------------end stop rabbit source--------------------");
 	}
 
-	private class RabbitTransaction extends BasicTransactionSemantics {
-		/*
-		 * (非 Javadoc) <p>Title: doPut</p> <p>Description: </p>
-		 * 
-		 * @param event
-		 * 
-		 * @throws InterruptedException
-		 * 
-		 * @see org.apache.flume.channel.BasicTransactionSemantics#doPut(org.apache.flume.Event)
-		 */
-		@Override
-		protected void doPut(Event event) throws InterruptedException {
-			LOGGER.debug("-------------------------put channel data to rabbit start-------------------------");
-			try {
-				byte[] data = this.serializeValue(event);
-				RabbitChannel.this.producerChannel.basicPublish(RabbitChannel.this.exchangename,
-						RabbitChannel.this.routingkey, MessageProperties.PERSISTENT_TEXT_PLAIN, data);
-				LOGGER.info("put event to channel success!data legth={}B", data.length);
-			} catch (Exception e) {
-				LOGGER.error(e.getMessage(), e);
-				e.printStackTrace();
-			}
-			LOGGER.debug("-------------------------put channel data to rabbit end-------------------------");
-		}
+	private Map<String, Object> deserializeValue(byte[] value) throws IOException, ClassNotFoundException {
+		ByteArrayInputStream bin = new ByteArrayInputStream(value);
+		ObjectInputStream obin = new ObjectInputStream(bin);
+		Map<String, Object> event = (Map<String, Object>) obin.readObject();
+		return event;
+	}
 
-		/*
-		 * (非 Javadoc) <p>Title: doTake</p> <p>Description: </p>
-		 * 
-		 * @return
-		 * 
-		 * @throws InterruptedException
-		 * 
-		 * @see org.apache.flume.channel.BasicTransactionSemantics#doTake()
-		 */
-		@Override
-		protected Event doTake() throws InterruptedException {
-			LOGGER.debug("-------------------------take channel data start-------------------------");
-			try {
-
-				List<Map<String, Object>> datas = new ArrayList<>();
-				for (int i = 0; i < RabbitChannel.this.capacity; i++) {
-					byte[] body = (byte[]) QUEUE.poll();
-					if (null == body) {
-						LOGGER.debug("no new message,will be break! current enevt size is {}", datas.size());
-						break;
-					}
-					datas.add(RabbitTransaction.this.deserializeValue(body));
-				}
-				if (datas.size() > 0) {
-					return EventBuilder.withBody(this.serializeValue(datas), null);
-				}
-			} catch (Exception e) {
-				LOGGER.error(e.getMessage(), e);
-				e.printStackTrace();
-			}
-			LOGGER.debug("-------------------------take channel data end-------------------------");
-			return null;
-		}
-
-		/*
-		 * (非 Javadoc) <p>Title: doCommit</p> <p>Description: </p>
-		 * 
-		 * @throws InterruptedException
-		 * 
-		 * @see org.apache.flume.channel.BasicTransactionSemantics#doCommit()
-		 */
-		@Override
-		protected void doCommit() throws InterruptedException {
-			// 确认消息
-		}
-
-		/*
-		 * (非 Javadoc) <p>Title: doRollback</p> <p>Description: </p>
-		 * 
-		 * @throws InterruptedException
-		 * 
-		 * @see org.apache.flume.channel.BasicTransactionSemantics#doRollback()
-		 */
-		@Override
-		protected void doRollback() throws InterruptedException {
-			// 无需事物
-		}
-
-		private byte[] serializeValue(List<Map<String, Object>> datas) throws IOException {
-			ByteArrayOutputStream obj = new ByteArrayOutputStream();
-			ObjectOutputStream out = new ObjectOutputStream(obj);
-			out.writeObject(datas);
-			return obj.toByteArray();
-		}
-
-		private byte[] serializeValue(Event event) throws IOException {
-			Map<String, Object> data = new HashMap<>();
-			data.put("headers", event.getHeaders());
-			data.put("body", event.getBody());
-			ByteArrayOutputStream obj = new ByteArrayOutputStream();
-			ObjectOutputStream out = new ObjectOutputStream(obj);
-			out.writeObject(data);
-			return obj.toByteArray();
-		}
-
-		private Map<String, Object> deserializeValue(byte[] value) throws IOException, ClassNotFoundException {
-			ByteArrayInputStream bin = new ByteArrayInputStream(value);
-			ObjectInputStream obin = new ObjectInputStream(bin);
-			Map<String, Object> event = (Map<String, Object>) obin.readObject();
-			return event;
-		}
+	private byte[] serializeValue(List<Map<String, Object>> datas) throws IOException {
+		ByteArrayOutputStream obj = new ByteArrayOutputStream();
+		ObjectOutputStream out = new ObjectOutputStream(obj);
+		out.writeObject(datas);
+		return obj.toByteArray();
 	}
 
 }

@@ -10,6 +10,8 @@
 		<module>flume-essink</module>
 		<module>flume-kafkachannel</module>
 		<module>flume-rabbitchannel</module>
+		<module>flume-rabbitsource</module>
+		<module>flume-rabbitsink</module>
 	</modules>
 	<build>
 		<plugins>
