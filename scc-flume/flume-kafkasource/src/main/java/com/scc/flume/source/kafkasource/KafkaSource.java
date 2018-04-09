@@ -49,6 +49,7 @@ public class KafkaSource extends AbstractPollableSource implements Configurable 
 	private Consumer<String, String> consumer;
 	private KafkaUtil kafkaUtil;
 	private ConsumerRecords<String, String> records;
+	private String capacity;
 
 	/*
 	 * (非 Javadoc) <p>Title: doProcess</p> <p>Description: </p>
@@ -70,6 +71,10 @@ public class KafkaSource extends AbstractPollableSource implements Configurable 
 			}
 			List<Event> events = new ArrayList<>();
 			for (ConsumerRecord<String, String> record : this.records) {
+				if (StringUtils.isBlank(record.topic())) {
+					LOGGER.info("can't get topic!");
+					continue;
+				}
 				String msg = record.value();
 				Map<String, String> headers = new HashMap<>();
 				headers.put("@topic", record.topic());
@@ -115,6 +120,15 @@ public class KafkaSource extends AbstractPollableSource implements Configurable 
 				"org.apache.kafka.common.serialization.StringDeserializer");
 		String value_deserializer_classname = context.getString(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
 				"org.apache.kafka.common.serialization.StringDeserializer");
+		this.capacity = context.getString("capacity");
+		if ((this.capacity == null) || (this.capacity.isEmpty())) {
+			this.capacity = "100";
+		}
+		if (Long.valueOf(this.capacity) > 1000) {
+			this.capacity = "1000";
+			LOGGER.warn("capacity MAX is 1000,now set capacity = 1000,because too MAX capacity will OOM!");
+		}
+		LOGGER.info("capacity={}", this.capacity);
 		LOGGER.info(
 				"load config,servers={},groupid={},auto_commit={},commit_interval={},topic_prefix={},topic_suffix={},topics={},key_deserializer={},value_deserializer={}",
 				new Object[] { this.servers, this.groupid, this.auto_commit, this.commit_interval, this.topic_prefix,
@@ -143,6 +157,7 @@ public class KafkaSource extends AbstractPollableSource implements Configurable 
 		props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, this.servers);
 		props.put(ConsumerConfig.GROUP_ID_CONFIG, this.groupid);
 		props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, this.auto_commit);
+		props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, this.capacity);
 		props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, this.commit_interval);
 		props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, this.key_deserializer);
 		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, this.value_deserializer);

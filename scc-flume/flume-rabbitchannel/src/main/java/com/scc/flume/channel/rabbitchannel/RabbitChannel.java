@@ -123,6 +123,7 @@ public class RabbitChannel extends BasicChannelSemantics {
 			LOGGER.info("get config capacity={}", this.capacity);
 			LOGGER.info("get config maxtmpsize={}", this.maxtmpsize);
 			LOGGER.info("get config customers={}", this.customers);
+			LOGGER.info("get config delaytime={}", this.delaytime);
 			List<Address> addresses = new ArrayList<>();
 			String[] strAddresses = address.split(",");
 			for (String strAddress : strAddresses) {

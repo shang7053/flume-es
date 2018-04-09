@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.flume.Channel;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
@@ -77,9 +78,13 @@ public class EsSink extends AbstractSink implements Configurable {
 			}
 			BulkRequestBuilder bulkRequest = this.client.prepareBulk();
 			for (Map<String, Object> e : events) {
+				Map<String, String> headers = (Map<String, String>) e.get("headers");
+				if (StringUtils.isBlank(headers.get("@topic"))) {
+					LOGGER.info("can't get topic!");
+					continue;
+				}
 				XContentBuilder builder = jsonBuilder().startObject();
 				byte[] body = (byte[]) e.get("body");
-				Map<String, String> headers = (Map<String, String>) e.get("headers");
 				builder.field("@message", new String(body));
 				for (Entry<String, String> header : headers.entrySet()) {
 					if (header.getKey().equals("@timestamp")) {

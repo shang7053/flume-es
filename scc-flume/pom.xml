@@ -12,6 +12,7 @@
 		<module>flume-rabbitchannel</module>
 		<module>flume-rabbitsource</module>
 		<module>flume-rabbitsink</module>
+		<module>flume-memchannel</module>
 	</modules>
 	<build>
 		<plugins>
