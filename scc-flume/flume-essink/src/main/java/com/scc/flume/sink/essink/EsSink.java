@@ -22,7 +22,6 @@ import org.apache.flume.Transaction;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.sink.AbstractSink;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
-import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
@@ -97,8 +96,9 @@ public class EsSink extends AbstractSink implements Configurable {
 				datas.add(builder);
 				bulkRequest.add(this.client.prepareIndex(headers.get("@topic"), "kafka_flume_log").setSource(builder));
 			}
-			BulkResponse bulkResponse = bulkRequest.execute().actionGet();
-			LOGGER.info("add data to es ,response status={}", bulkResponse.status().toString());
+			// BulkResponse bulkResponse = bulkRequest.execute().actionGet();
+			bulkRequest.execute();
+			LOGGER.info("add data to es!");
 			transaction.commit();
 		} catch (Exception e) {
 			transaction.rollback();

@@ -58,7 +58,7 @@ public class MemChannel extends BasicChannelSemantics {
 		LOGGER.info("=========================start config memery channel==============================");
 		try {
 			this.capacity = context.getInteger("capacity", 1);
-			this.maxtmpsize = context.getInteger("maxtmpsize", 100000);
+			this.maxtmpsize = context.getInteger("maxtmpsize", 50000);
 			this.delaytime = context.getLong("delaytime", 1000L);
 			LOGGER.info("get config capacity={}", this.capacity);
 			LOGGER.info("get config maxtmpsize={}", this.maxtmpsize);
@@ -77,6 +77,10 @@ public class MemChannel extends BasicChannelSemantics {
 						}
 						if (datas.size() > 0) {
 							LAST_QUEUE.add(MemChannel.this.serializeValue(datas));
+						}
+						if (LAST_QUEUE.size() > MemChannel.this.maxtmpsize) {
+							LOGGER.info("LAST_QUEUE too many message!sleep for {}ms", MemChannel.this.delaytime);
+							Thread.sleep(MemChannel.this.delaytime);
 						}
 						LOGGER.debug("FIRST_QUEUE size={}", FIRST_QUEUE.size());
 					}
@@ -121,7 +125,8 @@ public class MemChannel extends BasicChannelSemantics {
 				FIRST_QUEUE.add(data);
 				LOGGER.info("put event to channel success!data legth={}B", data.length);
 				if (FIRST_QUEUE.size() > MemChannel.this.maxtmpsize) {
-					LOGGER.info("too many message!sleep for {}ms", MemChannel.this.delaytime);
+					LOGGER.info("FIRST_QUEUE too many message!sleep for {}ms", MemChannel.this.delaytime);
+					Thread.sleep(MemChannel.this.delaytime);
 				}
 			} catch (Exception e) {
 				LOGGER.error(e.getMessage(), e);
